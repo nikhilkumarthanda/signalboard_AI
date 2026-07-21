@@ -2,6 +2,8 @@
 
 SignalBoard is an executive decision-intelligence platform for SaaS companies. It unifies revenue, customer, product, and operating data; detects important changes; forecasts outcomes; and translates the results into actionable executive briefings.
 
+**Live demo:** [signalboard-ai.nikhilthanda6.chatgpt.site](https://signalboard-ai.nikhilthanda6.chatgpt.site)
+
 ## Highlights
 
 - KPI command center for ARR, NRR, margin, and runway
@@ -21,7 +23,7 @@ The public demo uses deterministic fictional data. The included FastAPI service 
 
 ## Stack
 
-React 19, TypeScript, Vinext, Python, FastAPI, Pandas, NumPy, scikit-learn, and Cloudflare-compatible deployment.
+React 19, TypeScript, Vinext, Python, FastAPI, Pandas, NumPy, scikit-learn, and Cloudflare-compatible deployment. GitHub Actions verifies both the web application and Python service on every push and pull request.
 
 ## Run locally
 
