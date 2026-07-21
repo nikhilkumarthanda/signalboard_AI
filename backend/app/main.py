@@ -6,6 +6,8 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, root_mean_squared_error
 
 app = FastAPI(
     title="SignalBoard Analytics API",
@@ -16,7 +18,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:4173", "https://signalboard-ai.nikhilthanda6.chatgpt.site"],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -40,6 +42,19 @@ class ScenarioResult(BaseModel):
 
 class AlertUpdate(BaseModel):
     status: Literal["open", "resolved"]
+
+
+class ForecastInput(BaseModel):
+    values: list[float] = Field(min_length=8, max_length=120)
+    horizon: int = Field(6, ge=1, le=24)
+
+
+class HealthInput(BaseModel):
+    usage_change_pct: float = Field(0, ge=-100, le=500)
+    feature_adoption_pct: float = Field(50, ge=0, le=100)
+    open_tickets: int = Field(0, ge=0, le=1000)
+    payment_failures: int = Field(0, ge=0, le=100)
+    renewal_days: int = Field(90, ge=0, le=3650)
 
 
 @app.get("/health")
@@ -81,12 +96,71 @@ def scenario(request: ScenarioInput) -> ScenarioResult:
 
 
 @app.post("/api/v1/anomalies")
-def anomalies(values: list[float]) -> dict[str, list[int]]:
+def anomalies(values: list[float]) -> dict:
     if len(values) < 5:
-        return {"anomaly_indices": []}
+        return {"method": "isolation_forest", "anomalies": [], "anomaly_indices": []}
     clean = np.nan_to_num(np.asarray(values, dtype=float), nan=float(np.nanmedian(values)))
-    labels = IsolationForest(contamination="auto", random_state=42).fit_predict(clean.reshape(-1, 1))
-    return {"anomaly_indices": np.where(labels == -1)[0].tolist()}
+    model = IsolationForest(contamination="auto", random_state=42)
+    points = clean.reshape(-1, 1)
+    labels = model.fit_predict(points)
+    scores = -model.score_samples(points)
+    indices = np.where(labels == -1)[0].tolist()
+    return {
+        "method": "isolation_forest",
+        "anomaly_indices": indices,
+        "anomalies": [{"index": i, "value": float(clean[i]), "severity": round(float(scores[i]), 4)} for i in indices],
+    }
+
+
+@app.post("/api/v1/forecasts")
+def forecast(request: ForecastInput) -> dict:
+    """Fit a linear-trend baseline with a chronological holdout and transparent error metrics."""
+    values = np.asarray(request.values, dtype=float)
+    split = max(5, int(len(values) * 0.75))
+    train_x = np.arange(split).reshape(-1, 1)
+    test_x = np.arange(split, len(values)).reshape(-1, 1)
+    validation_model = LinearRegression().fit(train_x, values[:split])
+    validation = validation_model.predict(test_x)
+    actual = values[split:]
+    metrics = {
+        "mae": round(float(mean_absolute_error(actual, validation)), 4),
+        "rmse": round(float(root_mean_squared_error(actual, validation)), 4),
+        "mape_pct": round(float(mean_absolute_percentage_error(actual, validation) * 100), 2),
+    }
+    model = LinearRegression().fit(np.arange(len(values)).reshape(-1, 1), values)
+    future_x = np.arange(len(values), len(values) + request.horizon).reshape(-1, 1)
+    predictions = model.predict(future_x)
+    residual_std = float(np.std(actual - validation)) if len(actual) > 1 else 0.0
+    margin = 1.96 * residual_std
+    return {
+        "method": "linear_trend_baseline",
+        "training_points": len(values),
+        "holdout_points": len(actual),
+        "metrics": metrics,
+        "forecast": [round(float(v), 4) for v in predictions],
+        "lower_95": [round(float(v - margin), 4) for v in predictions],
+        "upper_95": [round(float(v + margin), 4) for v in predictions],
+        "limitations": "Baseline assumes the historical linear trend continues; intervals use holdout residual dispersion.",
+    }
+
+
+@app.post("/api/v1/customer-health")
+def customer_health(request: HealthInput) -> dict:
+    score = 70.0
+    drivers: list[dict[str, float | str]] = []
+    usage_impact = max(-35.0, min(20.0, request.usage_change_pct * 0.6))
+    adoption_impact = (request.feature_adoption_pct - 50) * 0.25
+    ticket_impact = -min(request.open_tickets * 2.5, 20)
+    payment_impact = -min(request.payment_failures * 12, 30)
+    renewal_impact = -15 if request.renewal_days < 30 else (-7 if request.renewal_days < 60 else 0)
+    for label, impact in [("usage trend", usage_impact), ("feature adoption", adoption_impact),
+                          ("support load", ticket_impact), ("payment reliability", payment_impact),
+                          ("renewal proximity", renewal_impact)]:
+        if impact:
+            drivers.append({"driver": label, "impact": round(float(impact), 1)})
+    score = round(max(0, min(100, score + sum(float(d["impact"]) for d in drivers))), 1)
+    band = "healthy" if score >= 75 else ("monitor" if score >= 50 else "at_risk")
+    return {"score": score, "band": band, "method": "explainable_weighted_score", "drivers": drivers}
 
 
 @app.patch("/api/v1/alerts/{alert_id}")
