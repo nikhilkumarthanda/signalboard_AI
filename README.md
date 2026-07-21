@@ -17,6 +17,8 @@ SignalBoard is a portfolio-grade executive analytics prototype for SaaS companie
 - Explainable customer-health scoring with per-driver impact
 - Linear-trend revenue baseline with chronological holdout validation, MAE, RMSE, MAPE, and residual intervals
 - Optional React server-route proxy to the FastAPI service through `ANALYTICS_API_URL`, with an explicitly labeled deterministic fallback
+- Stripe subscription synchronization and signed-webhook endpoints, activated only by server-side secrets
+- Render Blueprint for deploying the Dockerized analytics service from GitHub
 - GitHub Actions validation for the TypeScript application and Python API
 
 ## Honest product boundary
@@ -69,7 +71,8 @@ PYTHONPATH=backend python -m pytest backend/tests
 
 ## Production gaps intentionally not overstated
 
-- External OAuth connectors and webhooks are not implemented yet.
+- Salesforce, HubSpot, and warehouse OAuth connectors are not implemented yet.
+- Stripe sandbox synchronization and signature verification are implemented; activation requires account-issued secrets.
 - The production Python container requires a separate container host; GitHub Pages cannot execute Python services.
 - Forecast quality must be re-evaluated on real company history before operational use.
 - The demo is not a substitute for audited financial reporting.
