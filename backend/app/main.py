@@ -1,8 +1,14 @@
 from datetime import UTC, datetime
+import hashlib
+import hmac
+import json
+import os
+import time
 from typing import Literal
 
+import httpx
 import numpy as np
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sklearn.ensemble import IsolationForest
@@ -55,6 +61,15 @@ class HealthInput(BaseModel):
     open_tickets: int = Field(0, ge=0, le=1000)
     payment_failures: int = Field(0, ge=0, le=100)
     renewal_days: int = Field(90, ge=0, le=3650)
+
+
+def verify_stripe_signature(payload: bytes, signature: str, secret: str, tolerance: int = 300) -> bool:
+    parts = dict(item.split("=", 1) for item in signature.split(",") if "=" in item)
+    timestamp, received = parts.get("t", ""), parts.get("v1", "")
+    if not timestamp.isdigit() or abs(time.time() - int(timestamp)) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), timestamp.encode() + b"." + payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, received)
 
 
 @app.get("/health")
@@ -161,6 +176,50 @@ def customer_health(request: HealthInput) -> dict:
     score = round(max(0, min(100, score + sum(float(d["impact"]) for d in drivers))), 1)
     band = "healthy" if score >= 75 else ("monitor" if score >= 50 else "at_risk")
     return {"score": score, "band": band, "method": "explainable_weighted_score", "drivers": drivers}
+
+
+@app.post("/api/v1/integrations/stripe/sync")
+def stripe_sync() -> dict:
+    """Read subscription data from a Stripe sandbox using a server-side restricted key."""
+    api_key = os.getenv("STRIPE_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Stripe integration is not configured")
+    response = httpx.get(
+        "https://api.stripe.com/v1/subscriptions",
+        params={"status": "all", "limit": 100, "expand[]": "data.items.data.price"},
+        auth=(api_key, ""), timeout=20,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Stripe rejected the synchronization request")
+    subscriptions = response.json().get("data", [])
+    active_mrr = 0.0
+    status_counts: dict[str, int] = {}
+    for subscription in subscriptions:
+        status = subscription.get("status", "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if status not in {"active", "trialing", "past_due"}:
+            continue
+        for item in subscription.get("items", {}).get("data", []):
+            price = item.get("price", {})
+            amount = float(price.get("unit_amount") or 0) * int(item.get("quantity") or 1) / 100
+            interval = price.get("recurring", {}).get("interval")
+            active_mrr += amount / 12 if interval == "year" else amount
+    return {
+        "mode": "stripe_sandbox" if api_key.startswith(("sk_test_", "rk_test_")) else "stripe_live",
+        "subscriptions_scanned": len(subscriptions), "has_more": bool(response.json().get("has_more")),
+        "mrr": round(active_mrr, 2), "arr": round(active_mrr * 12, 2), "status_counts": status_counts,
+        "synced_at": datetime.now(UTC).isoformat(),
+    }
+
+
+@app.post("/api/v1/webhooks/stripe")
+async def stripe_webhook(request: Request, stripe_signature: str = Header(default="")) -> dict:
+    payload = await request.body()
+    secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    if not secret or not verify_stripe_signature(payload, stripe_signature, secret):
+        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+    event = json.loads(payload)
+    return {"received": True, "event_id": event.get("id"), "event_type": event.get("type")}
 
 
 @app.patch("/api/v1/alerts/{alert_id}")
