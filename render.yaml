@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: signalboard-analytics
+    runtime: docker
+    repo: https://github.com/nikhilkumarthanda/signalboard_AI
+    branch: main
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
