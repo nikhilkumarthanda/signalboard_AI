@@ -7,8 +7,11 @@ SignalBoard is an executive decision-intelligence platform for SaaS companies. I
 ## Highlights
 
 - KPI command center for ARR, NRR, margin, and runway
-- Revenue forecasting and prioritized business signals
-- Interactive pricing, churn, and hiring scenario studio
+- Functional Revenue, Customers, Product, Forecasts, Scenarios, Alerts, and Data Sources views
+- Searchable customer health and renewal portfolio
+- Interactive revenue metrics, product-adoption analytics, and forecast drivers
+- Live pricing, churn, and hiring scenario studio backed by API endpoints
+- Resolvable risk and expansion signal inbox
 - AI-style executive briefings
 - Connector-ready architecture for Stripe, Salesforce, HubSpot, and warehouses
 - Responsive executive interface
@@ -19,7 +22,7 @@ SignalBoard is an executive decision-intelligence platform for SaaS companies. I
 Business systems → Connectors → Normalized data → Python analytics API → Executive app
 ```
 
-The public demo uses deterministic fictional data. The included FastAPI service shows how live company data and Python models connect to the product.
+The public app uses deterministic fictional data so it is fast and safe to explore. Its normalized data contract is designed so the demo adapter can be replaced by Stripe, Salesforce, product analytics, support, and warehouse integrations without rewriting the views. The included FastAPI service mirrors the application API for a separately deployed Python analytics tier.
 
 ## Stack
 
